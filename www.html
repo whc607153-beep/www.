@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberOS Pro | 终极动态展示主页</title>
+    <style>
+        :root {
+            --primary: #00f2fe;
+            --secondary: #4facfe;
+            --bg: #030305;
+            --panel-bg: rgba(10, 11, 18, 0.55);
+            --border: rgba(0, 242, 254, 0.25);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        [data-theme="hacker"] {
+            --primary: #00ff66;
+            --secondary: #00aa33;
+            --bg: #010502;
+            --panel-bg: rgba(4, 12, 6, 0.65);
+            --border: rgba(0, 255, 102, 0.25);
+            --text-main: #f0fdf4;
+            --text-muted: #6ba37b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            perspective: 1200px; /* 激活3D视差空间 */
+            padding: 20px;
+        }
+
+        /* 动态 Canvas 粒子背景 */
+        #bg-canvas {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* 氛围发光环境光 */
+        .ambient-light {
+            position: fixed;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(0, 242, 254, 0.08) 0%, transparent 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            pointer-events: none;
+            filter: blur(50px);
+        }
+
+        /* 顶部系统状态栏 */
+        .sys-statusbar {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            padding: 10px 20px;
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            letter-spacing: 1px;
+            z-index: 10;
+        }
+
+        /* 核心3D视差悬浮窗口 */
+        .window-panel {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: 0 40px 90px rgba(0, 0, 0, 0.7), 
+                        0 0 30px rgba(0, 242, 254, 0.15),
+                        inset 0 1px 1px rgba(255,255,255,0.1);
+            z-index: 5;
+            overflow: hidden;
+            transform-style: preserve-3d; /* 内部元素支持立体层级 */
+            transition: box-shadow 0.3s ease;
+        }
+
+        .window-header {
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .dots { display: flex; gap: 8px; }
+        .dot { width: 11px; height: 11px; border-radius: 50%; background: #ff5f56; }
+        .dot:nth-child(2) { background: #ffbd2e; }
+        .dot:nth-child(3) { background: #27c93f; }
+        .window-title { font-size: 12px; font-weight: bold; color: var(--primary); letter-spacing: 0.5px; }
+
+        .window-body {
+            padding: 35px 30px;
+            max-height: 75vh;
+            overflow-y: auto;
+        }
+
+        /* 个人基本信息区（支持3D抬高） */
+        .profile-card {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+            margin-bottom: 30px;
+            transform: translateZ(40px); /* 在空间中向前跃出 */
+        }
+
+        .avatar-box {
+            position: relative;
+            width: 90px;
+            height: 90px;
+            flex-shrink: 0;
+        }
+        .avatar-box::after {
+            content: ''; position: absolute; inset: -4px; border-radius: 16px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            opacity: 0.5; filter: blur(6px); z-index: -1;
+        }
+        .avatar {
+            width: 100%; height: 100%; border-radius: 12px; object-fit: cover;
+            border: 2px solid rgba(255,255,255,0.2); background: #111;
+        }
+
+        .info h1 { font-size: 26px; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.5px; }
+        .info p { font-size: 13px; color: var(--primary); font-weight: 600; letter-spacing: 1px; }
+
+        /* 互动点赞徽章 */
+        .ping-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+            padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: bold;
+            margin-top: 10px; cursor: pointer; transition: all 0.2s;
+        }
+        .ping-badge:hover { background: var(--primary); color: #000; box-shadow: 0 0 15px var(--primary); }
+
+        /* 通用区块标题 */
+        .section-label {
+            font-size: 12px; color: var(--primary); font-weight: bold;
+            margin: 24px 0 12px; text-transform: uppercase; letter-spacing: 1.5px;
+            display: flex; align-items: center; gap: 8px;
+            transform: translateZ(25px);
+        }
+        .section-label::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
+
+        .bio-text { font-size: 15px; color: var(--text-muted); line-height: 1.6; transform: translateZ(20px); }
+
+        /* 核心技能标签 */
+        .skills-grid { display: flex; flex-wrap: wrap; gap: 8px; transform: translateZ(15px); }
+        .skill-node {
+            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+            padding: 6px 14px; border-radius: 20px; font-size: 13px; transition: all 0.25s;
+        }
+        .skill-node:hover { border-color: var(--primary); background: rgba(0,242,254,0.06); color: var(--primary); transform: translateY(-2px); }
+
+        /* 模块化矩阵链接 */
+        .links-column { display: flex; flex-direction: column; gap: 10px; transform: translateZ(10px); }
+        .interactive-link {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 18px; background: rgba(255,255,255,0.01);
+            border: 1px solid rgba(255,255,255,0.04); border-radius: 10px;
+            color: inherit; text-decoration: none; font-size: 14px; font-weight: 500;
+            transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+        .interactive-link:hover {
+            border-color: var(--primary);
+            background: rgba(255,255,255,0.05);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transform: translateX(4px);
+            color: var(--primary);
+        }
+
+        /* 右下角控制悬浮轮 */
+        .float-controls { position: fixed; bottom: 30px; right: 30px; display: flex; gap: 12px; z-index: 10; }
+        .ctl-btn {
+            background: var(--panel-bg); border: 1px solid var(--border);
+            width: 46px; height: 46px; border-radius: 50%; cursor: pointer;
+            color: var(--primary); display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); transition: transform 0.3s;
+        }
+        .ctl-btn:hover { transform: scale(1.1); color: #fff; border-color: var(--primary); }
+
+        /* 管理配置遮罩弹窗 */
+        .admin-modal {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+            z-index: 100; justify-content: center; align-items: center; padding: 20px; backdrop-filter: blur(15px);
+        }
+        .modal-body {
+            background: #0b0e14; border: 1px solid var(--border); border-radius: 16px;
+            width: 100%; max-width: 440px; padding: 26px; max-height: 85vh; overflow-y: auto;
+        }
+        .modal-body h3 { margin-bottom: 18px; color: var(--primary); font-size: 16px; }
+        .input-group { margin-bottom: 14px; }
+        .input-group label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; }
+        .input-group input, .input-group textarea {
+            width: 100%; background: #141822; border: 1px solid rgba(255,255,255,0.08);
+            padding: 10px 14px; border-radius: 8px; color: #fff; outline: none; font-size: 13px;
+        }
+        .input-group input:focus, .input-group textarea:focus { border-color: var(--primary); }
+        .modal-actions { display: flex; gap: 10px; margin-top: 22px; }
+        .action-btn { flex: 1; padding: 12px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; font-size: 13px; }
+        .btn-ok { background: var(--primary); color: #000; }
+        .btn-no { background: #202530; color: #fff; }
+
+        /* 滚动条 */
+        .window-body::-webkit-scrollbar { width: 5px; }
+        .window-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        @media (max-width: 500px) {
+            .profile-card { flex-direction: column; text-align: center; }
+            body { perspective: none; } /* 移动端关闭重度视差 */
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+    <canvas id="bg-canvas"></canvas>
+    <div class="ambient-light"></div>
+
+    <div class="sys-statusbar">
+        <div><i class="fas fa-satellite-dish"></i> MATRIX_NODE://STABLE</div>
+        <div id="top-clock">00:00:00</div>
+    </div>
+
+    <div class="window-panel" id="mainCard">
+        <div class="window-header">
+            <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+            <div class="window-title">CENTRAL_INTELLIGENCE.sys</div>
+            <div><i class="fas fa-shield-alt" style="opacity: 0.4; font-size: 12px;"></i></div>
+        </div>
+        <div class="window-body">
+            
+            <div class="profile-card">
+                <div class="avatar-box">
+                    <img src="" alt="Avatar" class="avatar" id="out-avatar">
+                </div>
+                <div class="info" style="text-align: left;">
+                    <h1 id="out-name">加载中...</h1>
+                    <p id="out-title">加载中...</p>
+                    <div class="ping-badge" id="pingClick">
+                        <i class="fas fa-bolt"></i> PING: <span id="out-pings">102</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-label"><i class="fas fa-fingerprint"></i> Identity Bio</div>
+            <p class="bio-text" id="out-bio">加载中...</p>
+
+            <div class="section-label"><i class="fas fa-terminal"></i> Vector Skills</div>
+            <div class="skills-grid" id="out-skills"></div>
+
+            <div class="section-label"><i class="fas fa-link"></i> Quantum Links</div>
+            <div class="links-column" id="out-links"></div>
+
+        </div>
+    </div>
+
+    <div class="float-controls">
+        <div class="ctl-btn" id="themeBtn" title="切换霓虹环境色"><i class="fas fa-palette"></i></div>
+        <div class="ctl-btn" id="editBtn" title="打开可视化后台输入资料"><i class="fas fa-cog"></i></div>
+    </div>
+
+    <div class="admin-modal" id="configModal">
+        <div class="modal-body">
+            <h3>⚙️ 注入控制台数据 / 配置个人主页</h3>
+            
+            <div class="input-group">
+                <label>特工代号 / 姓名</label>
+                <input type="text" id="in-name">
+            </div>
+            <div class="input-group">
+                <label>核心职能 / 标签</label>
+                <input type="text" id="in-title">
+            </div>
+            <div class="input-group">
+                <label>网络头像 URL 链接</label>
+                <input type="text" id="in-avatar">
+            </div>
+            <div class="input-group">
+                <label>核心宣言 / 个人简介</label>
+                <textarea id="in-bio" rows="3"></textarea>
+            </div>
+            <div class="input-group">
+                <label>技能模组 (英文逗号隔开)</label>
+                <input type="text" id="in-skills">
+            </div>
+            <div class="input-group">
+                <label>拓展终端 1 (格式: 按钮名字|网址路径)</label>
+                <input type="text" id="in-link1">
+            </div>
+            <div class="input-group">
+                <label>拓展终端 2 (格式: 按钮名字|网址路径)</label>
+                <input type="text" id="in-link2">
+            </div>
+
+            <div class="modal-actions">
+                <button class="action-btn btn-no" id="closeForm">放弃</button>
+                <button class="action-btn btn-ok" id="saveForm">保存并同步</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. 默认极客数据集 ---
+        const defaultBio = {
+            name: "戴夫 · 赛博",
+            title: "Cyber Security & UI Architect",
+            avatar: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200",
+            bio: "这是一个集全动态特效与可视化数据输入于一体的超前卫个人空间。点击右下角的齿轮即可开启数据注入，数据将实时锁定在本地安全模块中。",
+            skills: "React, WebGL, Cyber Security, TailwindCSS, Node.js",
+            link1: "⚡ 个人代码主仓库|https://github.com",
+            link2: "✉️ 建立量子安全加密通信|mailto:test@example.com"
+        };
+
+        // 核心渲染流
+        function updateUI() {
+            const cache = localStorage.getItem('cyber_v3_data');
+            const d = cache ? JSON.parse(cache) : defaultBio;
+
+            document.getElementById('out-name').innerText = d.name;
+            document.getElementById('out-title').innerText = d.title;
+            document.getElementById('out-avatar').src = d.avatar;
+            document.getElementById('out-bio').innerText = d.bio;
+
+            // 渲染矩阵技能
+            const skWrap = document.getElementById('out-skills');
+            skWrap.innerHTML = '';
+            d.skills.split(',').forEach(s => {
+                if(s.trim()){
+                    const n = document.createElement('span');
+                    n.className = 'skill-node';
+                    n.innerText = s.trim();
+                    skWrap.appendChild(n);
+                }
+            });
+
+            // 渲染终端链接
+            const lkWrap = document.getElementById('out-links');
+            lkWrap.innerHTML = '';
+            [d.link1, d.link2].forEach(l => {
+                if(l && l.includes('|')) {
+                    const [title, url] = l.split('|');
+                    const a = document.createElement('a');
+                    a.className = 'interactive-link';
+                    a.href = url.trim();
+                    a.target = '_blank';
+                    a.innerHTML = `<span>${title.trim()}</span><i class="fas fa-angle-right"></i>`;
+                    lkWrap.appendChild(a);
+                }
+            });
+        }
+
+        // --- 2. 炫酷特效 A: 3D 鼠标视差悬浮扭曲算法 ---
+        const card = document.getElementById('mainCard');
+        if (window.innerWidth > 500) {
+            document.addEventListener('mousemove', (e) => {
+                const calcX = (window.innerWidth / 2 - e.clientX) / 22;
+                const calcY = (window.innerHeight / 2 - e.clientY) / 22;
+                card.style.transform = `rotateY(${calcX}deg) rotateX(${-calcY}deg)`;
+            });
+            document.addEventListener('mouseleave', () => {
+                card.style.transform = `rotateY(0deg) rotateX(0deg)`;
+                card.style.transition = "transform 0.6s ease";
+            });
+            card.addEventListener('mouseenter', () => { card.style.transition = "none"; });
+        }
+
+        // --- 3. 炫酷特效 B: Canvas 动态浮游粒子引擎 ---
+        const canvas = document.getElementById('bg-canvas');
+        const ctx = canvas.getContext('2d');
+        let dotsArr = [];
+
+        function initCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', initCanvas);
+        initCanvas();
+
+        class GridDot {
+            constructor() { this.spawn(); }
+            spawn() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.r = Math.random() * 1.5 + 0.5;
+                this.vy = -(Math.random() * 0.4 + 0.1);
+                this.alpha = Math.random() * 0.5 + 0.1;
+            }
+            march() {
+                this.y += this.vy;
+                if(this.y < 0) this.spawn();
+            }
+            render() {
+                ctx.fillStyle = document.body.getAttribute('data-theme') === 'hacker' 
+                    ? `rgba(0, 255, 102, ${this.alpha})` 
+                    : `rgba(0, 242, 254, ${this.alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        for(let i=0; i<70; i++) dotsArr.push(new GridDot());
+        function renderLoop() {
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            dotsArr.forEach(d => { d.march(); d.render(); });
+            requestAnimationFrame(renderLoop);
+        }
+        renderLoop();
+
+        // --- 4. 炫酷特效 C: 点赞粒子数字喷射 ---
+        const pingBtn = document.getElementById('pingClick');
+        const pingCount = document.getElementById('out-pings');
+        pingBtn.addEventListener('click', (e) => {
+            pingCount.innerText = parseInt(pingCount.innerText) + 1;
+            const pop = document.createElement('span');
+            pop.innerText = '⚡ PING!';
+            pop.style.cssText = `position:fixed; left:${e.clientX}px; top:${e.clientY - 15}px; color:var(--primary); font-weight:bold; font-size:11px; pointer-events:none; transition:all 0.5s ease; z-index:999;`;
+            document.body.appendChild(pop);
+            setTimeout(() => { pop.style.transform = 'translateY(-35px) scale(1.2)'; pop.style.opacity = '0'; }, 10);
+            setTimeout(() => pop.remove(), 500);
+        });
+
+        // --- 5. 双模态色彩切换系统 ---
+        document.getElementById('themeBtn').addEventListener('click', () => {
+            if(document.body.getAttribute('data-theme') === 'hacker') {
+                document.body.removeAttribute('data-theme');
+            } else {
+                document.body.setAttribute('data-theme', 'hacker');
+            }
+        });
+
+        // --- 6. 交互弹窗数据流控制 ---
+        const modal = document.getElementById('configModal');
+        document.getElementById('editBtn').addEventListener('click', () => {
+            const cache = localStorage.getItem('cyber_v3_data');
+            const d = cache ? JSON.parse(cache) : defaultBio;
+
+            document.getElementById('in-name').value = d.name;
+            document.getElementById('in-title').value = d.title;
+            document.getElementById('in-avatar').value = d.avatar;
+            document.getElementById('in-bio').value = d.bio;
+            document.getElementById('in-skills').value = d.skills;
+            document.getElementById('in-link1').value = d.link1;
+            document.getElementById('in-link2').value = d.link2;
+
+            modal.style.display = 'flex';
+        });
+
+        document.getElementById('closeForm').addEventListener('click', () => modal.style.display = 'none');
+
+        document.getElementById('saveForm').addEventListener('click', () => {
+            const pack = {
+                name: document.getElementById('in-name').value,
+                title: document.getElementById('in-title').value,
+                avatar: document.getElementById('in-avatar').value,
+                bio: document.getElementById('in-bio').value,
+                skills: document.getElementById('in-skills').value,
+                link1: document.getElementById('in-link1').value,
+                link2: document.getElementById('in-link2').value
+            };
+            localStorage.setItem('cyber_v3_data', JSON.stringify(pack));
+            updateUI();
+            modal.style.display = 'none';
+        });
+
+        // 顶栏时钟
+        setInterval(() => { document.getElementById('top-clock').innerText = new Date().toLocaleTimeString(); }, 1000);
+
+        // 初始化
+        updateUI();
+    </script>
+</body>
+</html>
